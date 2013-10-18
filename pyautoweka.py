@@ -1,4 +1,6 @@
 import xml.etree.ElementTree as ET
+import xml.dom.minidom
+import os
 
 
 class InstanceGenerator(object):
@@ -61,12 +63,18 @@ class DataSet(object):
         used once the experiment completed (optional)
         :param name: name of the dataset (optional)
         """
-        self.train_file = train_file
-        self.test_file = test_file
+        self.train_file = os.path.abspath(train_file)
+        if test_file:
+            self.test_file = os.path.abspath(test_file)
+        else:
+            self.test_file = None
         self.name = name
 
 
 class Experiment:
+    """
+      TODO: classifier selection!
+    """
 
     RESULT_METRICS = ["errorRate",
                       "rmse",
@@ -124,7 +132,7 @@ class Experiment:
                                  ", ".join(Experiment.RESULT_METRICS)))
 
         if optimization_method not in Experiment.OPTIMIZATION_METHOD:
-            raise ValueError("%s is not a valid result metric,"
+            raise ValueError("%s is not a valid optimization method,"
                              " choose one from:" % (
                                  optimization_method,
                                  ", ".join(Experiment.OPTIMIZATION_METHOD)))
@@ -157,10 +165,14 @@ class Experiment:
         tree = ET.ElementTree(root)
 
         experiment = ET.SubElement(root, 'experimentComponent')
+
         name_node = ET.SubElement(experiment, 'name')
         name_node.text = self.experiment_name
 
-        experiment_constructor = ET.SubElement(root,
+        result_metric_node = ET.SubElement(experiment, 'resultMetric')
+        result_metric_node.text = self.result_metric
+
+        experiment_constructor = ET.SubElement(experiment,
                                                'experimentConstructor')
         experiment_constructor.text = Experiment.OPTIMIZATION_METHOD_CONSTRUCTOR[
             self.optimization_method]
@@ -219,6 +231,7 @@ class Experiment:
             name_node.text = dataset.name
 
         tree.write(file_name)
+        print xml.dom.minidom.parseString(ET.tostring(root)).toprettyxml()
 
 
     def add_data_set(self, train_file, test_file=None, name="data"):
