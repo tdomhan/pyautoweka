@@ -51,6 +51,15 @@ def get_available_classifiers(base_dir):
 
 AVAILABLE_CLASSIFIERS = get_available_classifiers(PYAUTOWEKA_BASEDIR)
 
+def run_program(cmd, hide_output=False):
+    if hide_output:
+        call(cmd,
+             stdout=open(os.devnull),
+             stderr=open(os.devnull))
+    else:
+        call(cmd)
+
+
 class InstanceGenerator(object):
     def __init__(self):
         self.name = "Default"
@@ -364,11 +373,11 @@ class Experiment:
             self.prepared = False
             raise Exception("Could not prepare the experiment")
 
-    def run(self, seed=0, hide_output=True):
+    def run(self, seeds=[0], hide_output=True):
         """
             Run a experiment that was previously created
 
-            :param seed: seed for the random number generator
+            :param seeds: a list of seeds for the random number generator
         """
         if not self.prepared:
             self.prepare()
@@ -378,18 +387,34 @@ class Experiment:
             print "Running experiment on dataset %s" % dataset.name
             experiment_folder = os.path.join(EXPERIMENT_FOLDER,
                                              self.experiment_name + "-" + dataset.name)
-            experiment_runner = [ "java",
+            for seed in seeds:
+                print "Running for seed %d" % seed
+                experiment_runner = [ "java",
+                                      "-cp",
+                                      "autoweka.jar",
+                                      "autoweka.tools.ExperimentRunner",
+                                      experiment_folder,
+                                      str(seed)]
+                run_program(experiment_runner, hide_output=hide_output)
+            #now let's merge the trajectories
+            trajectory_merger = ["java",
                                   "-cp",
                                   "autoweka.jar",
-                                  "autoweka.tools.ExperimentRunner",
-                                  experiment_folder,
-                                  str(seed)]
-            print " ".join(experiment_runner)
-            if hide_output:
-                call(experiment_runner,
-                     stdout=open(os.devnull),
-                     stderr=open(os.devnull))
-            else:
-                call(experiment_runner)
+                                  "autoweka.TrajectoryMerger",
+                                  experiment_folder]
+            print "Merging trajectories"
+            run_program(trajectory_merger, hide_output=hide_output)
+
+            """
+            java -cp autoweka.jar autoweka.tools.GetBestFromTrajectoryGroup experiments/Experiment-creditg.arff/Experiment-creditg.arff.trajectories
+            """
+
+    def predict(self, data):
+        """
+        Make predictions on unseen data, using the best parameters.
+
+        autoweka.tools.TrainedModelPredictionRunner
+        """
+
 
 
