@@ -1,7 +1,51 @@
 import xml.etree.ElementTree as ET
 import xml.dom.minidom
+from subprocess import call
 import os
+import imp
 
+"""
+NOTES
+
+ * auto-wekalight doesn't work: 
+            java -cp "./lib/weka.jar;autoweka-light.jar" autoweka.ExperimentConstructor experiments/experiment.xml
+            Error: Could not find or load main class autoweka.ExperimentConstructor
+
+ * How do you get available classifiers??
+    * read all param files? or interface pyautoweka somehow
+
+ * Get the directory of the python package:
+    import imp
+    e.g. imp.find_module("sklearn")[1]
+
+ * creating the actual experiment from the XML file:
+   java -cp autoweka.jar autoweka.ExperimentConstructor experiments/experiment.xml
+
+ * running the experiment afterwards:
+     arguments: folder + seed
+   java -cp autoweka.jar autoweka.Experiment experiments/Experiment-data 0
+
+"""
+
+PYAUTOWEKA_BASEDIR = imp.find_module("pyautoweka")[1]
+#TODO: fix to current dir until we actually install it
+PYAUTOWEKA_BASEDIR = "./"
+
+def get_available_classifiers(base_dir):
+    """
+        Determine the available classifiers by iterating over
+        all parameter files.
+    """
+    params_dir = os.path.join(PYAUTOWEKA_BASEDIR,"params")
+    classifiers = []
+    for root, dir, files in os.walk(params_dir):
+        for file in files:
+            if file.startswith("weka.classifiers") and file.endswith(".params"):
+                clf = file[0:-len(".params")]
+                classifiers.append(clf)
+    return classifiers
+
+AVAILABLE_CLASSIFIERS = get_available_classifiers(PYAUTOWEKA_BASEDIR)
 
 class InstanceGenerator(object):
     def __init__(self):
@@ -21,7 +65,7 @@ class CrossValidation(InstanceGenerator):
     def __init__(self, seed=0, num_folds=10):
         """
         :param seed: The seed to use for randomizing the dataset
-        :param num_folds: The number of folds to generate
+        :param num_fold./s: The number of folds to generate
         """
         super(CrossValidation, self).__init__()
         self.name = "autoweka.instancegenerators.CrossValidation"
@@ -52,6 +96,7 @@ class RandomSubSampling(InstanceGenerator):
         self.params["percent"] = percent_training
         if bias_to_uniform:
             self.params["bias"] = bias_to_uniform
+
 
 class DataSet(object):
     def __init__(self, train_file, test_file=None, name="data"):
@@ -90,11 +135,14 @@ class Experiment:
 
     OPTIMIZATION_METHOD_ARGS = {
         "SMAC": [
-            "-experimentpath", "experiments", "-propertyoverride",
-            "smacexecutable=smac-v2.04.01-master-447-patched/smac"
+            "-experimentpath", os.path.abspath("experiments"),
+            "-propertyoverride",
+            ("smacexecutable=%s" 
+             "smac-v2.04.01-master-447-patched/smac" % PYAUTOWEKA_BASEDIR)
             ],
         "TPE": [
-            "-experimentpath", "experiments", "-propertyoverride",
+            "-experimentpath", os.path.abspath("experiments"),
+            "-propertyoverride",
             ("pythonpath=$PYTHONPATH\:~/src/hyperopt\:~/src/hyperopt/external:"
              "tperunner=./src/python/tperunner.py:python=/usr/bin/python2")
             ]
@@ -156,11 +204,17 @@ class Experiment:
         self.memory = memory
 
         self.datasets = []
+        self.classifiers = []
 
-    def write_xml(self, file_name="experiment.xml"):
+        self.file_name = None
+
+        self.prepared = False
+
+    def _get_xml(self):
         """
         Write this experiment as a valid xml that can be read by Auto-WEKA.
         """
+
         root = ET.Element('experimentBatch')
         tree = ET.ElementTree(root)
 
@@ -194,20 +248,20 @@ class Experiment:
         else:
             instance_generator_node.text = self.instance_generator.name
             instance_generator_args_node = ET.SubElement(
-                    experiment,
-                    'instanceGeneratorArgs')
+                experiment,
+                'instanceGeneratorArgs')
             instance_generator_args_node.text = self.instance_generator.get_arg_str()
 
         tuner_timeout_node = ET.SubElement(experiment, 'tunerTimeout')
         tuner_timeout_node.text = str(self.tuner_timeout)
         train_timeout_node = ET.SubElement(experiment, 'trainTimeout')
         train_timeout_node.text = str(self.train_timeout)
-            
+
         attribute_selection_node = ET.SubElement(experiment, 'attributeSelection')
         if self.attribute_selection:
             attribute_selection_node.text = "true"
             attr_select_timeout_node = ET.SubElement(
-                    experiment, 'attributeSelectionTimeout')
+                experiment, 'attributeSelectionTimeout')
             attr_select_timeout_node.text = str(self.attribute_selection_timeout)
         else:
             attribute_selection_node.text = "false"
@@ -230,9 +284,20 @@ class Experiment:
             name_node = ET.SubElement(dataset_node, 'name')
             name_node.text = dataset.name
 
-        tree.write(file_name)
-        print xml.dom.minidom.parseString(ET.tostring(root)).toprettyxml()
+        for classifier in self.classifiers:
+            classifier_node = ET.SubElement(root, 'allowedClassifiers')
+            classifier_node.text = classifier
 
+        return tree
+
+    def __repr__(self):
+        root = self._get_xml().getroot()
+        return xml.dom.minidom.parseString(ET.tostring(root)).toprettyxml()
+
+    def _write_xml(self, file_name="experiment.xml"):
+        tree = self._get_xml()
+        self.file_name = file_name
+        tree.write(file_name)
 
     def add_data_set(self, train_file, test_file=None, name="data"):
         """
@@ -243,4 +308,59 @@ class Experiment:
         used once the experiment completed (optional)
         :param name: name of the dataset (optional)
         """
+        if not os.path.exists(train_file):
+            raise Exception("train_file doesn't exist")
+        if test_file is not None and not os.path.exists(test_file):
+            raise Exception("test_file doesn't exist")
         self.datasets.append(DataSet(train_file, test_file, name))
+
+    def add_classfier(self, clf):
+        """
+        Restrict the search to a certain classifier. Call multiple times to select more than one.
+        If not called, all classifiers will be used.
+
+        For a list of available classifiers see: pyautoweka.AVAILABLE_CLASSIFIERS
+
+        :param clf: the classifier
+        """
+        if not clf in AVAILABLE_CLASSIFIERS:
+            raise ValueError("%s is not one of the AVAILABLE_CLASSIFIERS." % clf)
+        self.classifiers.append(clf)
+
+    def prepare(self):
+        """
+        Creates the experiment folder.
+
+        java -cp autoweka.jar autoweka.ExperimentConstructor
+        """
+        if len(self.datasets) == 0:
+            raise Exception("No datasets added yet, see Experiment.add_data_set")
+        self._write_xml()
+        experiment_constructor = [ "java",
+                                   "-cp",
+                                   "autoweka.jar",
+                                   "autoweka.ExperimentConstructor",
+                                   self.file_name]
+        ret = call(experiment_constructor)
+        if ret == 0:
+            #TODO: check return type for errors
+            self.prepared = True
+            return
+        else:
+            self.prepared = False
+            raise Exception("Could not prepare the experiment")
+
+    def run(self):
+        """
+            Run a experiment that was previously created
+        """
+        if not self.prepared:
+            self.prepare()
+        #TODO: set folder name now
+        experiment_runner = [ "java",
+                              "-cp",
+                              "autoweka.jar",
+                              "autoweka.tools.ExperimentRunner",
+                              self.file_name]
+
+
