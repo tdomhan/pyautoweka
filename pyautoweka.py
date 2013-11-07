@@ -1,6 +1,7 @@
 import xml.etree.ElementTree as ET
 import xml.dom.minidom
 from subprocess import call
+import datetime
 import os
 import imp
 
@@ -26,6 +27,9 @@ NOTES
    java -cp autoweka.jar autoweka.Experiment experiments/Experiment-data 0
 
 """
+
+
+EXPERIMENT_FOLDER = "experiments"
 
 PYAUTOWEKA_BASEDIR = imp.find_module("pyautoweka")[1]
 #TODO: fix to current dir until we actually install it
@@ -135,13 +139,13 @@ class Experiment:
 
     OPTIMIZATION_METHOD_ARGS = {
         "SMAC": [
-            "-experimentpath", os.path.abspath("experiments"),
+            "-experimentpath", os.path.abspath(EXPERIMENT_FOLDER),
             "-propertyoverride",
             ("smacexecutable=%s" 
              "smac-v2.04.01-master-447-patched/smac" % PYAUTOWEKA_BASEDIR)
             ],
         "TPE": [
-            "-experimentpath", os.path.abspath("experiments"),
+            "-experimentpath", os.path.abspath(EXPERIMENT_FOLDER),
             "-propertyoverride",
             ("pythonpath=$PYTHONPATH\:~/src/hyperopt\:~/src/hyperopt/external:"
              "tperunner=./src/python/tperunner.py:python=/usr/bin/python2")
@@ -245,6 +249,10 @@ class Experiment:
         if not self.instance_generator:
             #Default generator
             instance_generator_node.text = "autoweka.instancegenerators.Default"
+            instance_generator_args_node = ET.SubElement(
+                experiment,
+                'instanceGeneratorArgs')
+            instance_generator_args_node.text = ""
         else:
             instance_generator_node.text = self.instance_generator.name
             instance_generator_args_node = ET.SubElement(
@@ -266,6 +274,10 @@ class Experiment:
         else:
             attribute_selection_node.text = "false"
 
+        for classifier in self.classifiers:
+            classifier_node = ET.SubElement(experiment, 'allowedClassifiers')
+            classifier_node.text = classifier
+
         memory_node = ET.SubElement(experiment, 'memory')
         memory_node.text = str(self.memory)
 
@@ -284,10 +296,6 @@ class Experiment:
             name_node = ET.SubElement(dataset_node, 'name')
             name_node.text = dataset.name
 
-        for classifier in self.classifiers:
-            classifier_node = ET.SubElement(root, 'allowedClassifiers')
-            classifier_node.text = classifier
-
         return tree
 
     def __repr__(self):
@@ -299,7 +307,7 @@ class Experiment:
         self.file_name = file_name
         tree.write(file_name)
 
-    def add_data_set(self, train_file, test_file=None, name="data"):
+    def add_data_set(self, train_file, test_file=None, name=None):
         """
         Add a dataset to the experiment.
 
@@ -312,6 +320,12 @@ class Experiment:
             raise Exception("train_file doesn't exist")
         if test_file is not None and not os.path.exists(test_file):
             raise Exception("test_file doesn't exist")
+        if name == None:
+            name = os.path.basename(train_file)
+        #check there's not other dataset with the same name
+        for dataset in self.datasets:
+            if dataset.name == name:
+                raise ValueError("A dataset with the name '%s', was already added." % name)
         self.datasets.append(DataSet(train_file, test_file, name))
 
     def add_classfier(self, clf):
@@ -335,7 +349,7 @@ class Experiment:
         """
         if len(self.datasets) == 0:
             raise Exception("No datasets added yet, see Experiment.add_data_set")
-        self._write_xml()
+        self._write_xml(self.experiment_name + ".xml")
         experiment_constructor = [ "java",
                                    "-cp",
                                    "autoweka.jar",
@@ -350,17 +364,32 @@ class Experiment:
             self.prepared = False
             raise Exception("Could not prepare the experiment")
 
-    def run(self):
+    def run(self, seed=0, hide_output=True):
         """
             Run a experiment that was previously created
+
+            :param seed: seed for the random number generator
         """
         if not self.prepared:
             self.prepare()
-        #TODO: set folder name now
-        experiment_runner = [ "java",
-                              "-cp",
-                              "autoweka.jar",
-                              "autoweka.tools.ExperimentRunner",
-                              self.file_name]
+        print "Running experiments"
+        print "Time allocated(see Experiment.tuner_timeout): ", str(datetime.timedelta(seconds=self.tuner_timeout))
+        for dataset in self.datasets:
+            print "Running experiment on dataset %s" % dataset.name
+            experiment_folder = os.path.join(EXPERIMENT_FOLDER,
+                                             self.experiment_name + "-" + dataset.name)
+            experiment_runner = [ "java",
+                                  "-cp",
+                                  "autoweka.jar",
+                                  "autoweka.tools.ExperimentRunner",
+                                  experiment_folder,
+                                  str(seed)]
+            print " ".join(experiment_runner)
+            if hide_output:
+                call(experiment_runner,
+                     stdout=open(os.devnull),
+                     stderr=open(os.devnull))
+            else:
+                call(experiment_runner)
 
 
