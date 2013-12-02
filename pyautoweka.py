@@ -1,6 +1,7 @@
 import xml.etree.ElementTree as ET
 import xml.dom.minidom
 from subprocess import call
+import numpy as np
 import datetime
 import os
 import imp
@@ -11,9 +12,6 @@ NOTES
  * auto-wekalight doesn't work: 
             java -cp "./lib/weka.jar;autoweka-light.jar" autoweka.ExperimentConstructor experiments/experiment.xml
             Error: Could not find or load main class autoweka.ExperimentConstructor
-
- * How do you get available classifiers??
-    * read all param files? or interface pyautoweka somehow
 
  * Get the directory of the python package:
     import imp
@@ -58,6 +56,27 @@ def run_program(cmd, hide_output=False):
              stderr=open(os.devnull))
     else:
         call(cmd)
+
+def arff_write(fname, name, X, y, feature_names=None):
+    """
+    Write out an arff file based on X and y.
+    """
+    unique_labels = list(set(y))
+    nexamples = len(X[0])
+    if feature_names == None:
+        feature_names = ["feature%d" % i for i in xrange(0,nexamples)]
+    with open(fname, 'w') as fout:
+        fout.write("@RELATION %s\n" % name)
+        for feature_name in feature_names:
+            fout.write("@ATTRIBUTE %s REAL\n" % feature_name)
+        fout.write("@ATTRIBUTE class {%s}\n" % ", ".join([str(x) for x in unique_labels]))
+        fout.write("@DATA\n")
+        for row, label in zip(X, y):
+            for value in row:
+                fout.write(str(value))
+                fout.write(",")
+            fout.write(str(label))
+            fout.write("\n")
 
 
 class InstanceGenerator(object):
@@ -130,9 +149,6 @@ class DataSet(object):
 
 
 class Experiment:
-    """
-      TODO: classifier selection!
-    """
 
     RESULT_METRICS = ["errorRate",
                       "rmse",
@@ -316,9 +332,51 @@ class Experiment:
         self.file_name = file_name
         tree.write(file_name)
 
-    def add_data_set(self, train_file, test_file=None, name=None):
+    def set_data_set(self,
+                     train_data,
+                     train_labels,
+                     test_data=None,
+                     test_labels=None,
+                     feature_names=None,
+                     name="dataset1"):
+        """
+        Add a dataset that the experiment will be run on.
+        (For now only on dataset per experiment is supported)
+
+        :param train_data: training data as a 2 dimensional list, examples x features
+        :param test_data: test data as a 2 dimensional list, examples x features
+        :param feature_names: the name of each feature
+        :param name: the name of the dataset
+        """
+        fname_train = name + "_train.arff"
+        if test_data and test_labels:
+            fname_test = name + "_test.arff"
+            #add the labels as the last column to the test data:
+            test_data = np.asarray(test_data)
+            test_labels = np.asarray(test_labels)
+            test_combined = np.append(test_data,test_labels[:,None],1)
+        else:
+            fname_test = None
+
+        #add the labels as the last column to the train data:
+        train_data = np.asarray(train_data)
+        train_labels = np.asarray(train_labels)
+        train_combined = np.append(train_data,train_labels[:,None],1)
+ 
+        if feature_names:
+            arff.dump(fname_train, train_combined, relation=name)
+            if fname_test:
+                arff.dump(fname_test, test_combined, relation=name)
+        else:
+            arff.dump(fname_train, train_combined, relation=name, names=feature_names)
+            if fname_test:
+                arff.dump(fname_test, test_combined, relation=name, names=feature_names)
+        self.datasets = [DataSet(fname_train, fname_test, name)]
+
+    def set_data_set_files(self, train_file, test_file=None, name=None):
         """
         Add a dataset to the experiment.
+        (For now only on dataset per experiment is supported)
 
         :param train_file: ARFF file containing the training data
         :param test_file: ARFF file containing the testing data, that will be
@@ -335,7 +393,7 @@ class Experiment:
         for dataset in self.datasets:
             if dataset.name == name:
                 raise ValueError("A dataset with the name '%s', was already added." % name)
-        self.datasets.append(DataSet(train_file, test_file, name))
+        self.datasets = [DataSet(train_file, test_file, name)]
 
     def add_classfier(self, clf):
         """
@@ -357,7 +415,7 @@ class Experiment:
         java -cp autoweka.jar autoweka.ExperimentConstructor
         """
         if len(self.datasets) == 0:
-            raise Exception("No datasets added yet, see Experiment.add_data_set")
+            raise Exception("No datasets added yet, see Experiment.set_data_set")
         self._write_xml(self.experiment_name + ".xml")
         experiment_constructor = [ "java",
                                    "-cp",
@@ -406,15 +464,34 @@ class Experiment:
             run_program(trajectory_merger, hide_output=hide_output)
 
             """
+            Getting the best hyperparameters + classifier
             java -cp autoweka.jar autoweka.tools.GetBestFromTrajectoryGroup experiments/Experiment-creditg.arff/Experiment-creditg.arff.trajectories
+            TODO: use this to get the best seed
             """
 
-    def predict(self, data):
+    def predict(self, data, hide_output=False):
         """
         Make predictions on unseen data, using the best parameters.
 
         autoweka.tools.TrainedModelPredictionRunner
         """
+        #TODO: check the experiment has been run already
+        if len(self.datasets) == 0:
+            raise Exception("No datasets added yet, see Experiment.set_data_set")
+ 
+        prediction_runner = ["java",
+                             "-cp",
+                             "autoweka.jar",
+                             "autoweka.tools.TrainedModelPredictionRunner",
+                             "-model",
+                             "",
+                             "-attributeselection",
+                             "",
+                             "-dataset",
+                             "",
+                             "-predictionpath",
+                             "out.csv"]
+        run_program(prediction_runner, hide_output=hide_output)
 
 
 
