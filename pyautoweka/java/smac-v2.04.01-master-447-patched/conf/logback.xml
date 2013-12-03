@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<configuration>
+
+<!-- <define name="logFile" class="ca.ubc.cs.beta.config."-->
+
+  <appender name="FILE" class="ch.qos.logback.core.FileAppender">
+  <file>${OUTPUTDIR}/${RUNGROUPDIR}/log-run${NUMRUN}.txt</file>
+  <append>false</append>
+  <encoder>
+    	<pattern>%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
+    	<!--RAW OUTPUT-->
+      <!--<pattern>%msg%n</pattern>-->
+    </encoder>
+  </appender>
+  
+  
+  <appender name="FILE-WARN" class="ch.qos.logback.core.FileAppender">
+  <file>${OUTPUTDIR}/${RUNGROUPDIR}/log-warn${NUMRUN}.txt</file>
+  <append>false</append>
+  <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
+  	<level>WARN</level>
+  </filter>
+  <encoder>
+    	<pattern>%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
+    	<!--RAW OUTPUT-->
+      <!--<pattern>%msg%n</pattern>-->
+    </encoder>
+  </appender>
+  
+  
+  <appender name="FILE-ERR" class="ch.qos.logback.core.FileAppender">
+  <file>${OUTPUTDIR}/${RUNGROUPDIR}/log-err${NUMRUN}.txt</file>
+  <append>false</append>
+  <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
+  	<level>ERROR</level>
+  </filter>
+  <encoder>
+    	<pattern>%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
+    	<!--RAW OUTPUT-->
+      <!--<pattern>%msg%n</pattern>-->
+    </encoder>
+  </appender>
+  
+  
+  
+  <!-- 
+  <appender name="FILE-RAW" class="ch.qos.logback.core.FileAppender">
+  <file>${OUTPUTDIR}/${RUNGROUPDIR}/raw-run${NUMRUN}.txt</file>
+  <append>false</append>
+  <encoder>
+      <pattern>%msg%n</pattern>
+    </encoder>
+  </appender>
+   -->
+ 
+ 
+  <appender name="RUNHASHLOG" class="ch.qos.logback.core.FileAppender">
+  <filter class="ca.ubc.cs.beta.aclib.misc.logback.RunHashMarkerFilter" />
+  <append>false</append>
+  <file>${OUTPUTDIR}/${RUNGROUPDIR}/runhashes-run${NUMRUN}.txt</file>
+  <encoder>
+      <pattern>%msg%n</pattern>
+  </encoder>
+ </appender>
+  
+  
+  <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+    <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
+  		<level>${STDOUT-LEVEL}</level>
+  	</filter>
+    <encoder>
+    	<!--<pattern>%d{HH:mm:ss.SSS} [%thread]  %logger{36} - %msg%n</pattern>-->
+    	<!--RAW OUTPUT-->
+    	
+      <pattern>[%-5level] %msg%n</pattern>
+    </encoder>
+    
+  </appender>
+  
+  <logger name="ca.ubc.cs.beta.smac.RunHistory" level="warn"/>
+  <!-- <logger name="ca.ubc.cs.beta.aclib.model.builder" level="trace"/> -->
+  
+  <root level="${ROOT-LEVEL}">
+    <appender-ref ref="STDOUT" />
+    <appender-ref ref="FILE" />
+    <!-- <appender-ref ref="FILE-RAW" />-->
+    <appender-ref ref="FILE-WARN"/>
+    <appender-ref ref="RUNHASHLOG"/>
+    <appender-ref ref="FILE-ERR"/>
+  </root>
+    
+</configuration>

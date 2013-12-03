@@ -1,0 +1,3 @@
+include README.md
+recursive-include pyautoweka/java *.jar
+recursive-include pyautoweka/java *.params
