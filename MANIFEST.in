@@ -1,3 +1,6 @@
 include README.md
 recursive-include pyautoweka/java *.jar
 recursive-include pyautoweka/java *.params
+recursive-include pyautoweka/java *.sh
+recursive-include pyautoweka/java *.class
+recursive-include pyautoweka/java *.xml

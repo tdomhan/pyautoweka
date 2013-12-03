@@ -6,6 +6,8 @@ import datetime
 import os
 import imp
 
+from pkg_resources import resource_filename
+
 """
 NOTES
 
@@ -33,16 +35,12 @@ NOTES
 
 EXPERIMENT_BASE_FOLDER = "experiments"
 
-PYAUTOWEKA_BASEDIR = imp.find_module("pyautoweka")[1]
-#TODO: fix to current dir until we actually install it
-PYAUTOWEKA_BASEDIR = "./"
-
-def get_available_classifiers(base_dir):
+def get_available_classifiers():
     """
         Determine the available classifiers by iterating over
         all parameter files.
     """
-    params_dir = os.path.join(PYAUTOWEKA_BASEDIR,"params")
+    params_dir = resource_filename(__name__, 'java/params')
     classifiers = []
     for root, dir, files in os.walk(params_dir):
         for file in files:
@@ -51,15 +49,16 @@ def get_available_classifiers(base_dir):
                 classifiers.append(clf)
     return classifiers
 
-AVAILABLE_CLASSIFIERS = get_available_classifiers(PYAUTOWEKA_BASEDIR)
+AVAILABLE_CLASSIFIERS = get_available_classifiers()
 
 def run_program(cmd, hide_output=False):
     if hide_output:
-        call(cmd,
+        ret = call(cmd,
              stdout=open(os.devnull),
              stderr=open(os.devnull))
     else:
-        call(cmd)
+        ret = call(cmd)
+    return ret
 
 def arff_write(fname, name, X, y, feature_names=None):
     """
@@ -170,9 +169,9 @@ class Experiment:
         "SMAC": [
             "-experimentpath", os.path.abspath(EXPERIMENT_BASE_FOLDER),
             "-propertyoverride",
-            ("smacexecutable=%s" 
-             "smac-v2.04.01-master-447-patched/smac" % PYAUTOWEKA_BASEDIR)
+            ("smacexecutable=%s" % (resource_filename(__name__, 'java/smac-v2.04.01-master-447-patched/smac.sh')))
             ],
+        #TODO: fix the TPE paths
         "TPE": [
             "-experimentpath", os.path.abspath(EXPERIMENT_BASE_FOLDER),
             "-propertyoverride",
@@ -412,7 +411,7 @@ class Experiment:
             raise ValueError("%s is not one of the AVAILABLE_CLASSIFIERS." % clf)
         self.classifiers.append(clf)
 
-    def prepare(self):
+    def prepare(self, hide_output=True):
         """
         Creates the experiment folder.
 
@@ -423,10 +422,10 @@ class Experiment:
         self._write_xml(self.experiment_name + ".xml")
         experiment_constructor = [ "java",
                                    "-cp",
-                                   "autoweka.jar",
+                                   resource_filename(__name__, 'java/autoweka.jar'),
                                    "autoweka.ExperimentConstructor",
                                    self.file_name]
-        ret = call(experiment_constructor)
+        ret = run_program(experiment_constructor, hide_output=hide_output)
         if ret == 0:
             #TODO: check return type for errors
             self.prepared = True
@@ -452,7 +451,7 @@ class Experiment:
                 print "Running for seed %d" % seed
                 experiment_runner = [ "java",
                                       "-cp",
-                                      "autoweka.jar",
+                                      resource_filename(__name__, 'java/autoweka.jar'),
                                       "autoweka.tools.ExperimentRunner",
                                       experiment_folder,
                                       str(seed)]
@@ -460,7 +459,7 @@ class Experiment:
             #now let's merge the trajectories
             trajectory_merger = ["java",
                                   "-cp",
-                                  "autoweka.jar",
+                                  resource_filename(__name__, 'java/autoweka.jar'),
                                   "autoweka.TrajectoryMerger",
                                   experiment_folder]
             print "Merging trajectories"
@@ -486,7 +485,7 @@ class Experiment:
             raise Exception("Trajectories file doesn't exist. Did you run the experiment?")
         best_trajectory_group = ["java",
                                  "-cp",
-                                 "autoweka.jar",
+                                 resource_filename(__name__, 'java/autoweka.jar'),
                                  "autoweka.tools.GetBestFromTrajectoryGroup",
                                  trajectories_file]
         program_output = str(check_output(best_trajectory_group))
@@ -516,7 +515,7 @@ class Experiment:
         #TODO: what if there's not attribute selection
         prediction_runner = ["java",
                              "-cp",
-                             "autoweka.jar",
+                             resource_filename(__name__, 'java/autoweka.jar'),
                              "autoweka.tools.TrainedModelPredictionMaker",
                              "-model",
                              "%s/trained.%d.model" % (experiment_folder, seed),
