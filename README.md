@@ -24,13 +24,23 @@ AutoWeka for python.
 import pyautoweka
 
 #Create an experiment
-experiment = pyautoweka.Experiment()
+experiment = pyautoweka.Experiment(tuner_timeout=9000)
+```
+`tuner_timeout` is the time the optimization will run in seconds. So e.g. 9000 seconds = 2.5 hours. The longer you run the optimization, the better of course.
 
-#Add some data to it
-experiment.add_data_set("./datasets/creditg.arff")
+```python
+#Either set the path to a dataset in the arff format:
+experiment.set_data_set_files("./dataset.arff")
+#Or provide a numpy ndarray:
+experiment.set_data_set(X,y)
 
-#Run the experiment
+#Run the experiment:
 experiment.run()
+
+#Make predictions:
+experiment.predict_from_file(data_file="testdataset.arff")
+#Or from a numpy ndarray:
+experiment.predict(X)
 ```
 
 

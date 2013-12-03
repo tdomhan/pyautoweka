@@ -19,6 +19,8 @@ DEVELOPMENT NOTES
             java -cp "./lib/weka.jar;autoweka-light.jar" autoweka.ExperimentConstructor experiments/experiment.xml
             Error: Could not find or load main class autoweka.ExperimentConstructor
 
+ * write the data to python temporary files that will later on be deleted...
+
 """
 
 
