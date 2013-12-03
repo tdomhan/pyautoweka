@@ -1,6 +1,11 @@
 pyautoweka
 ==========
 
+Description
+-----------
+
+pyautoweka is a python wrapper for [Auto-WEKA](http://www.cs.ubc.ca/labs/beta/Projects/autoweka/), a Java application for algorithm selection and hyperparameter optimizations, that is build on [WEKA](http://www.cs.waikato.ac.nz/ml/weka/). 
+
 
 Installation
 ------------
