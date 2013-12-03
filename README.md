@@ -1,6 +1,18 @@
 pyautoweka
 ==========
 
+
+Installation
+------------
+
+Go to the project sources and run:
+```
+python setup.py install
+```
+
+Running a experiment
+--------------------
+
 AutoWeka for python.
 
 ```python
