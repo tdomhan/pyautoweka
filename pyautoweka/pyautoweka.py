@@ -9,26 +9,15 @@ import imp
 from pkg_resources import resource_filename
 
 """
-NOTES
+DEVELOPMENT NOTES
 
  * API for getting experiment results
 
- * API for running + training + predicting predicting
+ * API for running + training + predicting
 
  * auto-wekalight doesn't work: 
             java -cp "./lib/weka.jar;autoweka-light.jar" autoweka.ExperimentConstructor experiments/experiment.xml
             Error: Could not find or load main class autoweka.ExperimentConstructor
-
- * Get the directory of the python package:
-    import imp
-    e.g. imp.find_module("sklearn")[1]
-
- * creating the actual experiment from the XML file:
-   java -cp autoweka.jar autoweka.ExperimentConstructor experiments/experiment.xml
-
- * running the experiment afterwards:
-     arguments: folder + seed
-   java -cp autoweka.jar autoweka.Experiment experiments/Experiment-data 0
 
 """
 
@@ -344,7 +333,7 @@ class Experiment:
                      name="dataset1"):
         """
         Add a dataset that the experiment will be run on.
-        (For now only on dataset per experiment is supported)
+        (For now only one dataset per experiment is supported)
 
         :param train_data: training data as a 2 dimensional list, examples x features
         :param test_data: test data as a 2 dimensional list, examples x features
@@ -364,16 +353,14 @@ class Experiment:
         #add the labels as the last column to the train data:
         train_data = np.asarray(train_data)
         train_labels = np.asarray(train_labels)
-        train_combined = np.append(train_data,train_labels[:,None],1)
+        #train_combined = np.append(train_data,train_labels[:,None],1)
  
-        if feature_names:
-            arff.dump(fname_train, train_combined, relation=name)
-            if fname_test:
-                arff.dump(fname_test, test_combined, relation=name)
-        else:
-            arff.dump(fname_train, train_combined, relation=name, names=feature_names)
-            if fname_test:
-                arff.dump(fname_test, test_combined, relation=name, names=feature_names)
+        #arff.dump(fname_train, train_combined, relation=name)
+        arff_write(fname_train, name, train_data, train_labels, feature_names)
+        if fname_test:
+            #arff.dump(fname_test, test_combined, relation=name)
+            arff_write(fname_test, name, test_data, test_labels, feature_names)
+
         self.datasets = [DataSet(fname_train, fname_test, name)]
 
     def set_data_set_files(self, train_file, test_file=None, name=None):
@@ -410,12 +397,12 @@ class Experiment:
         if not clf in AVAILABLE_CLASSIFIERS:
             raise ValueError("%s is not one of the AVAILABLE_CLASSIFIERS." % clf)
         self.classifiers.append(clf)
+        self.prepared = False
 
     def prepare(self, hide_output=True):
         """
         Creates the experiment folder.
 
-        java -cp autoweka.jar autoweka.ExperimentConstructor
         """
         if len(self.datasets) == 0:
             raise Exception("No datasets added yet, see Experiment.set_data_set")
@@ -465,12 +452,6 @@ class Experiment:
             print "Merging trajectories"
             run_program(trajectory_merger, hide_output=hide_output)
 
-            """
-            Getting the best hyperparameters + classifier
-            java -cp autoweka.jar autoweka.tools.GetBestFromTrajectoryGroup experiments/Experiment-creditg.arff/Experiment-creditg.arff.trajectories
-            TODO: use this to get the best seed
-            """
-
     def get_experiment_folder(self, dataset):
         experiment_folder = os.path.join(EXPERIMENT_BASE_FOLDER,
                                          self.experiment_name + "-" + dataset.name)
@@ -488,6 +469,7 @@ class Experiment:
                                  resource_filename(__name__, 'java/autoweka.jar'),
                                  "autoweka.tools.GetBestFromTrajectoryGroup",
                                  trajectories_file]
+        print " ".join(best_trajectory_group)
         program_output = str(check_output(best_trajectory_group))
         seed = -1
         for line in program_output.split("\n"):
@@ -502,6 +484,7 @@ class Experiment:
         Make predictions on unseen data, using the best parameters.
 
         The predictions will be written in CSV format into predictions_file.
+        TODO: predict from ndarray
         """
         #TODO: check the experiment has been run already
         if len(self.datasets) == 0:
