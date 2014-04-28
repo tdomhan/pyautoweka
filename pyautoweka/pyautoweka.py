@@ -512,5 +512,31 @@ class Experiment:
                              predictions_file]
         run_program(prediction_runner, hide_output=hide_output)
 
+    def fit(X, y):
+        """
+        Fit a model to the data.
+
+        X: array-like samples x features
+        y: array-like labels
+        """
+        X = np.asarray(X)
+        y = np.asarray(y)
+
+        assert len(X.shape) == 2
+        assert len(X.shape) == 1
+
+        self.set_data_set(X,y)
+        self.run()
+
+    def fit_arff(file_name):
+        self.set_data_set(file_name)
+        self.run()
+
+    def predict(X):
+        pass
+
+    def score(X, y):
+        pass
+
 
 

@@ -1,1 +1,1 @@
-from pyautoweka import DataSet, CrossValidation, RandomSubSampling, Experiment
+from pyautoweka import DataSet, CrossValidation, RandomSubSampling, Experiment, AVAILABLE_CLASSIFIERS
