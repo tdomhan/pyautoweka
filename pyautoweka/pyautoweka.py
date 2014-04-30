@@ -53,12 +53,14 @@ def run_program(cmd, hide_output=False):
         ret = call(cmd)
     return ret
 
-def arff_write(fout, name, X, y, feature_names=None):
+def arff_write(fout, name, X, y, feature_names=None, unique_labels=None, ):
     """
     Write out an arff file based on X and y.
     """
-    unique_labels = np.unique(y)#list(set(y))
+    if unique_labels is None:
+        unique_labels = np.unique(y)#list(set(y))
     nexamples = len(X[0])
+
     if feature_names == None:
         feature_names = ["feature%d" % i for i in xrange(0,nexamples)]
     fout.write("@RELATION %s\n" % name)
@@ -155,7 +157,7 @@ class RandomSubSampling(InstanceGenerator):
 
 
 class DataSet(object):
-    def __init__(self, train_file, test_file=None, name="data"):
+    def __init__(self, train_file, test_file=None, name="data", unique_labels=None):
         """
         Dataset.
 
@@ -170,6 +172,7 @@ class DataSet(object):
         else:
             self.test_file = None
         self.name = name
+        self.unique_labels = unique_labels
 
 
 class Experiment:
@@ -214,7 +217,7 @@ class Experiment:
             instance_generator=None,
             tuner_timeout=180,
             train_timeout=120,
-            attribute_selection=True,
+            attribute_selection=False,
             attribute_selection_timeout=100,
             memory="3000m"
             ):
@@ -381,8 +384,9 @@ class Experiment:
 
             assert len(test_data.shape) == 2, "test_data needs to be 2d: n_samples x n_features"
             assert len(test_labels.shape) == 1, "test_labels needs to be 1d"
+            #assert test_labels.dtype == np.int, "the labels need to be integer values"
 
-            test_combined = np.append(test_data,test_labels[:,None],1)
+            #test_combined = np.append(test_data,test_labels[:,None],1)
         else:
             fname_test = None
 
@@ -390,18 +394,20 @@ class Experiment:
         train_data = np.asarray(train_data)
         train_labels = np.asarray(train_labels)
         #train_combined = np.append(train_data,train_labels[:,None],1)
+        train_unique_labels = np.unique(train_labels)
 
         assert len(train_data.shape) == 2, "train_data needs to be 2d: n_samples x n_features + 1 (label)"
         assert len(train_labels.shape) == 1, "train_labels needs to be 1d"
+        #assert train_labels.dtype == np.int, "the labels need to be integer values"
  
         with open(fname_train, 'w') as fout:
             arff_write(fout, name, train_data, train_labels, feature_names)
 
         if fname_test:
             with open(fname_test, 'w') as fout:
-                arff_write(fout, name, test_combined, test_labels, feature_names)
+                arff_write(fout, name, test_data, test_labels, feature_names)
 
-        self.datasets = [DataSet(fname_train, fname_test, name)]
+        self.datasets = [DataSet(fname_train, fname_test, name, train_unique_labels)]
 
     def set_data_set_files(self, train_file, test_file=None, name=None):
         """
@@ -544,13 +550,15 @@ class Experiment:
                              resource_filename(__name__, 'java/autoweka.jar'),
                              "autoweka.tools.TrainedModelPredictionMaker",
                              "-model",
-                             "%s/trained.%d.model" % (experiment_folder, seed),
-                             "-attributeselection",
-                             "%s/trained.%d.attributeselection" % (experiment_folder, seed),
-                             "-dataset",
-                             data_file,
-                             "-predictionpath",
-                             predictions_file]
+                             "%s/trained.%d.model" % (experiment_folder, seed)]
+        attributeselection_file = "%s/trained.%d.attributeselection" % (experiment_folder, seed)
+        if self.attribute_selection and os.path.exists(attributeselection_file):
+            prediction_runner.append("-attributeselection")
+            prediction_runner.append(attributeselection_file)
+        prediction_runner.extend(["-dataset",
+            data_file,
+            "-predictionpath",
+            predictions_file])
         run_program(prediction_runner, hide_output=hide_output)
 
     def fit(self, X, y):
@@ -593,14 +601,20 @@ class Experiment:
 
                 #TODO: check if train and test data have the same dimensionality
 
-                pseudo_label = np.ones(X.shape[0])
+                pseudo_label = [self.datasets[0].unique_labels[0]] * X.shape[0]
 
-                arff_write(prediction_file, "prediction_data", X, pseudo_label)
+                arff_write(prediction_file,
+                    "prediction_data",
+                    X,
+                    pseudo_label,
+                    unique_labels=self.datasets[0].unique_labels)
                 prediction_file.flush()
 
-                self.predict_from_file(prediction_data_path, predictions_file=prediction_output_path)
+                self.predict_from_file(prediction_data_path,
+                    predictions_file=prediction_output_path,
+                    hide_output=True)
 
-                #read the output:
+                #read the output:   
                 with open(prediction_output_path) as predictions_input:
                     predictions = read_predictions_from_csv(predictions_input)
                     return predictions
