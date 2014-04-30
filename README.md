@@ -10,18 +10,10 @@ pyautoweka is a python wrapper for [Auto-WEKA](http://www.cs.ubc.ca/labs/beta/Pr
 Installation
 ------------
 
-download:
+Download, go to the project sources and install:
 ```
 git clone git@github.com:tdomhan/pyautoweka.git
-```
-
-go to the project sources:
-```
 cd pyautoweka
-```
-
-install:
-```
 python setup.py install
 ```
 
