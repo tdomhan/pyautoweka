@@ -5,6 +5,8 @@ import numpy as np
 import datetime
 import os
 import imp
+import ast
+import tempfile
 
 from pkg_resources import resource_filename
 
@@ -51,26 +53,54 @@ def run_program(cmd, hide_output=False):
         ret = call(cmd)
     return ret
 
-def arff_write(fname, name, X, y, feature_names=None):
+def arff_write(fout, name, X, y, feature_names=None):
     """
     Write out an arff file based on X and y.
     """
-    unique_labels = list(set(y))
+    unique_labels = np.unique(y)#list(set(y))
     nexamples = len(X[0])
     if feature_names == None:
         feature_names = ["feature%d" % i for i in xrange(0,nexamples)]
-    with open(fname, 'w') as fout:
-        fout.write("@RELATION %s\n" % name)
-        for feature_name in feature_names:
-            fout.write("@ATTRIBUTE %s REAL\n" % feature_name)
-        fout.write("@ATTRIBUTE class {%s}\n" % ", ".join([str(x) for x in unique_labels]))
-        fout.write("@DATA\n")
-        for row, label in zip(X, y):
-            for value in row:
-                fout.write(str(value))
-                fout.write(",")
-            fout.write(str(label))
-            fout.write("\n")
+    fout.write("@RELATION %s\n" % name)
+    for feature_name in feature_names:
+        fout.write("@ATTRIBUTE %s REAL\n" % feature_name)
+    fout.write("@ATTRIBUTE class {%s}\n" % ", ".join([str(x) for x in unique_labels]))
+    fout.write("@DATA\n")
+    for row, label in zip(X, y):
+        for value in row:
+            fout.write(str(value))
+            fout.write(",")
+        fout.write(str(label))
+        fout.write("\n")
+
+
+def simple_csv_read(fin, skip_header=True):
+    """
+        Read csv file and yield row by row.
+        Note: escaping is not supported
+    """
+    for line in fin:
+        yield line.split(",")
+
+def value_to_literal(value):
+    """ 
+        Tries to convert a value to either a 
+        float, int or boolean.
+    """
+    try:
+        return ast.literal_eval(value)
+    except:
+        return value
+
+def read_predictions_from_csv(fin):
+    rows = simple_csv_read(fin)
+    header = next(rows)
+    header_field_to_idx = dict(zip(header, range(len(header))))
+    predictions = []
+    for row in rows:
+        prediction = row[header_field_to_idx["predicted"]].split(":")[1]
+        predictions.append(value_to_literal(prediction))
+    return np.asarray(predictions)
 
 
 class InstanceGenerator(object):
@@ -191,10 +221,10 @@ class Experiment:
         """
         Create a new experiment.
 
-        :param tuner_timeout: The number of seconds to run the SMBO method.
+        :param tuner_timeout: The number of seconds to run the SMBO method. (total timeout)
         :param train_timeout: The number of seconds to spend training
         a classifier with a set of hyperparameters on a given partition of
-        the training set.
+        the training set. (timeout per parameter setting)
         """
         if result_metric not in Experiment.RESULT_METRICS:
             raise ValueError("%s is not a valid result metric,"
@@ -337,17 +367,21 @@ class Experiment:
         Add a dataset that the experiment will be run on.
         (For now only one dataset per experiment is supported)
 
-        :param train_data: training data as a 2 dimensional list, examples x features
-        :param test_data: test data as a 2 dimensional list, examples x features
+        :param train_data: training data as a 2 dimensional list, n_samples x n_features + 1 (label)
+        :param test_data: test data as a 2 dimensional list, n_samples x n_features
         :param feature_names: the name of each feature
         :param name: the name of the dataset
         """
         fname_train = name + "_train.arff"
-        if test_data and test_labels:
+        if test_data is not None and test_labels is not None:
             fname_test = name + "_test.arff"
             #add the labels as the last column to the test data:
             test_data = np.asarray(test_data)
             test_labels = np.asarray(test_labels)
+
+            assert len(test_data.shape) == 2, "test_data needs to be 2d: n_samples x n_features"
+            assert len(test_labels.shape) == 1, "test_labels needs to be 1d"
+
             test_combined = np.append(test_data,test_labels[:,None],1)
         else:
             fname_test = None
@@ -356,12 +390,16 @@ class Experiment:
         train_data = np.asarray(train_data)
         train_labels = np.asarray(train_labels)
         #train_combined = np.append(train_data,train_labels[:,None],1)
+
+        assert len(train_data.shape) == 2, "train_data needs to be 2d: n_samples x n_features + 1 (label)"
+        assert len(train_labels.shape) == 1, "train_labels needs to be 1d"
  
-        #arff.dump(fname_train, train_combined, relation=name)
-        arff_write(fname_train, name, train_data, train_labels, feature_names)
+        with open(fname_train, 'w') as fout:
+            arff_write(fout, name, train_data, train_labels, feature_names)
+
         if fname_test:
-            #arff.dump(fname_test, test_combined, relation=name)
-            arff_write(fname_test, name, test_data, test_labels, feature_names)
+            with open(fname_test, 'w') as fout:
+                arff_write(fout, name, test_combined, test_labels, feature_names)
 
         self.datasets = [DataSet(fname_train, fname_test, name)]
 
@@ -429,6 +467,8 @@ class Experiment:
 
             :param seeds: a list of seeds for the random number generator
         """
+        #TODO: run multiple experiments in parallel (maybe one per CPU: multiprocessing.cpu_count())
+        #      -> let each java process run in the background and wait until all the processes have finished
         if not self.prepared:
             self.prepare()
         print "Running experiments"
@@ -471,7 +511,7 @@ class Experiment:
                                  resource_filename(__name__, 'java/autoweka.jar'),
                                  "autoweka.tools.GetBestFromTrajectoryGroup",
                                  trajectories_file]
-        print " ".join(best_trajectory_group)
+        #print " ".join(best_trajectory_group)
         program_output = str(check_output(best_trajectory_group))
         seed = -1
         for line in program_output.split("\n"):
@@ -479,9 +519,10 @@ class Experiment:
                 seed = int(line[len("Best point seed"):])
         if seed < 0:
             raise Exception("Failed getting seed")
+        #print "Best seed: %d" % seed
         return seed
 
-    def predict_from_file(self, data_file, predictions_file="out.csv", hide_output=False):
+    def predict_from_file(self, data_file, predictions_file="out.csv", hide_output=True):
         """
         Make predictions on unseen data, using the best parameters.
 
@@ -498,7 +539,7 @@ class Experiment:
         experiment_folder = self.get_experiment_folder(dataset)
 
         #TODO: what if there's not attribute selection
-        prediction_runner = ["java",
+        prediction_runner = ["java",    
                              "-cp",
                              resource_filename(__name__, 'java/autoweka.jar'),
                              "autoweka.tools.TrainedModelPredictionMaker",
@@ -512,30 +553,69 @@ class Experiment:
                              predictions_file]
         run_program(prediction_runner, hide_output=hide_output)
 
-    def fit(X, y):
+    def fit(self, X, y):
         """
         Fit a model to the data.
 
         X: array-like samples x features
         y: array-like labels
         """
-        X = np.asarray(X)
-        y = np.asarray(y)
 
-        assert len(X.shape) == 2
-        assert len(X.shape) == 1
+        self.set_data_set(X, y)
 
-        self.set_data_set(X,y)
         self.run()
 
-    def fit_arff(file_name):
+    def fit_arff(self, file_name):
         self.set_data_set(file_name)
         self.run()
 
-    def predict(X):
-        pass
+    def predict(self, X):
+        """
+        """
 
-    def score(X, y):
+        temp_dir = tempfile.mkdtemp()
+        prediction_data_path = os.path.join(temp_dir, "X.arff")
+        prediction_output_path = os.path.join(temp_dir, "out.csv")
+
+
+        try:
+            #write to temporary file:
+            #predict_fd, predict_file_path = tempfile.mkstemp(suffix=".arff")
+            #print "writing to temporary file: %s" % predict_file_path
+
+
+            with open(prediction_data_path, 'w') as prediction_file:
+            #prediction_file = os.fdopen(predict_fd, 'w')
+
+                X = np.asarray(X)
+
+                assert len(X.shape) == 2, "X needs to be 2d: n_samples x n_features"
+
+                #TODO: check if train and test data have the same dimensionality
+
+                pseudo_label = np.ones(X.shape[0])
+
+                arff_write(prediction_file, "prediction_data", X, pseudo_label)
+                prediction_file.flush()
+
+                self.predict_from_file(prediction_data_path, predictions_file=prediction_output_path)
+
+                #read the output:
+                with open(prediction_output_path) as predictions_input:
+                    predictions = read_predictions_from_csv(predictions_input)
+                    return predictions
+        finally:
+            if os.path.exists(prediction_data_path):
+                os.remove(prediction_data_path)
+
+            if os.path.exists(prediction_output_path):
+                os.remove(prediction_output_path)
+
+            os.rmdir(temp_dir)
+
+        return None
+
+    def score(self, X, y):
         pass
 
 
