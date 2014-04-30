@@ -40,10 +40,7 @@ import numpy as np
 import random
 
 X = np.loadtxt("iris.data", delimiter=",", usecols=range(4))
-y_labels = np.loadtxt("iris.data", delimiter=",", usecols=[4], dtype="object")
-
-
-label_to_int = dict(zip(np.unique(y), range(len(np.unique(y)))))
+y = np.loadtxt("iris.data", delimiter=",", usecols=[4], dtype="object")
 
 #shuffle the data:
 indices = range(len(X))
@@ -65,9 +62,11 @@ experiment.fit(X_train, y_train)
 y_predict = experiment.predict(X_test)
 
 #Let's check what accuracy we get:
-
-
+num_correct = sum([1 for predicted, correct in zip(y_predict, y_test) if predicted == correct])
+print "Accuracy: %f" % float(num_correct) / len(y_test)
 ```
+
+This should give you an accuracy in the high 90%s.
 
 
 Advanced: Selecting specific classifiers
