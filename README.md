@@ -17,8 +17,8 @@ cd pyautoweka
 python setup.py install
 ```
 
-Running an experiment
---------------------
+Running a classification experiment
+-----------------------------------
 
 AutoWeka for python.
 
@@ -26,11 +26,11 @@ AutoWeka for python.
 import pyautoweka
 
 #Create an experiment
-experiment = pyautoweka.Experiment(tuner_timeout=9000)
+experiment = pyautoweka.ClassificationExperiment(tuner_timeout=360)
 ```
-`tuner_timeout` is the time the optimization will run in seconds. So e.g. 9000 seconds = 2.5 hours. The longer you run the optimization, the better of course. (Note that the `experiment` object has an interface similar to sklearn classifiers.) 
+`tuner_timeout` is the time the optimization will run in seconds. So e.g. 360 seconds = 6 minutes. The longer you run the optimization, the better of course. (Note that the `experiment` object has an interface similar to sklearn classifiers.) 
 
-First we need to load some data. Let's for example the the famous [Iris dataset](http://archive.ics.uci.edu/ml/datasets/Iris). Download it using [this link](http://archive.ics.uci.edu/ml/machine-learning-databases/iris/iris.data).
+First we need to load some data. Let's for example the famous [Iris dataset](http://archive.ics.uci.edu/ml/datasets/Iris). Download it using [this link](http://archive.ics.uci.edu/ml/machine-learning-databases/iris/iris.data).
 
 Let's load it into python:
 
@@ -63,10 +63,53 @@ y_predict = experiment.predict(X_test)
 
 #Let's check what accuracy we get:
 num_correct = sum([1 for predicted, correct in zip(y_predict, y_test) if predicted == correct])
-print "Accuracy: %f" % float(num_correct) / len(y_test)
+print "Accuracy: %f" % (float(num_correct) / len(y_test))
 ```
 
 This should give you an accuracy in the high 90%s.
+
+Running a regression experiment
+-----------------------------------
+
+```python
+import pyautoweka
+
+#Create an experiment
+experiment = pyautoweka.RegressionExperiment(tuner_timeout=360)
+```
+
+First we need to load some data. Let's for example the [Boston housing dataset](https://archive.ics.uci.edu/ml/datasets/Housing). Download it using [this link](https://archive.ics.uci.edu/ml/machine-learning-databases/housing/housing.data).
+
+```python
+#load the data:
+import numpy as np
+import random
+
+X = np.loadtxt("housing.data.txt", usecols=range(13))
+y = np.loadtxt("housing.data.txt", usecols=[13])
+
+#shuffle the data:
+indices = range(len(X))
+random.shuffle(indices)
+X = X[indices]
+y = y[indices]
+
+#split into train and test set:
+X_train = X[0:100]
+y_train = y[0:100]
+
+X_test = X[100:]
+y_test = y[100:]
+
+#now we can fit a model:
+experiment.fit(X_train, y_train)
+
+#and regress on held out test data:
+y_predict = experiment.predict(X_test)
+
+#RMSE of the prediction:
+rmse = np.sqrt(((y_predict-y_test)**2).mean())
+```
 
 
 Advanced: Selecting specific classifiers

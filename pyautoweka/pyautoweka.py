@@ -1,6 +1,7 @@
 import xml.etree.ElementTree as ET
 import xml.dom.minidom
 from subprocess import call, check_output
+from abc import ABCMeta, abstractmethod
 import numpy as np
 import datetime
 import os
@@ -9,21 +10,6 @@ import ast
 import tempfile
 
 from pkg_resources import resource_filename
-
-"""
-DEVELOPMENT NOTES
-
- * API for getting experiment results
-
- * API for running + training + predicting
-
- * auto-wekalight doesn't work: 
-            java -cp "./lib/weka.jar;autoweka-light.jar" autoweka.ExperimentConstructor experiments/experiment.xml
-            Error: Could not find or load main class autoweka.ExperimentConstructor
-
- * write the data to python temporary files that will later on be deleted...
-
-"""
 
 
 EXPERIMENT_BASE_FOLDER = "experiments"
@@ -53,12 +39,14 @@ def run_program(cmd, hide_output=False):
         ret = call(cmd)
     return ret
 
-def arff_write(fout, name, X, y, feature_names=None, unique_labels=None, ):
+def arff_write(fout, name, X, y, feature_names=None, unique_labels=None):
     """
     Write out an arff file based on X and y.
+
+    nans are treated as missing values, that will be encoded as ?
+
+    unique_labels: the unique labels in y. Set to None if y contains real numbers
     """
-    if unique_labels is None:
-        unique_labels = np.unique(y)#list(set(y))
     nexamples = len(X[0])
 
     if feature_names == None:
@@ -66,11 +54,18 @@ def arff_write(fout, name, X, y, feature_names=None, unique_labels=None, ):
     fout.write("@RELATION %s\n" % name)
     for feature_name in feature_names:
         fout.write("@ATTRIBUTE %s REAL\n" % feature_name)
-    fout.write("@ATTRIBUTE class {%s}\n" % ", ".join([str(x) for x in unique_labels]))
+    if unique_labels is not None:
+        fout.write("@ATTRIBUTE class {%s}\n" % ", ".join([str(x) for x in unique_labels]))
+    else:
+        fout.write("@ATTRIBUTE target REAL\n")
     fout.write("@DATA\n")
     for row, label in zip(X, y):
         for value in row:
-            fout.write(str(value))
+            if np.isfinite(value):
+                fout.write(str(value))
+            else:
+                #missing value, encoded as ?
+                fout.write("?")
             fout.write(",")
         fout.write(str(label))
         fout.write("\n")
@@ -100,7 +95,9 @@ def read_predictions_from_csv(fin):
     header_field_to_idx = dict(zip(header, range(len(header))))
     predictions = []
     for row in rows:
-        prediction = row[header_field_to_idx["predicted"]].split(":")[1]
+        prediction = row[header_field_to_idx["predicted"]]
+        if ":" in prediction:
+            prediction = prediction.split(":")[1]
         predictions.append(value_to_literal(prediction))
     return np.asarray(predictions)
 
@@ -175,13 +172,9 @@ class DataSet(object):
         self.unique_labels = unique_labels
 
 
-class Experiment:
+class Experiment(object):
 
-    RESULT_METRICS = ["errorRate",
-                      "rmse",
-                      "rrse",
-                      "meanAbsoluteErrorMetric",
-                      "relativeAbsoluteErrorMetric"]
+    __metaclass__ = ABCMeta
 
     OPTIMIZATION_METHOD = ["SMAC", "TPE"]
 
@@ -212,7 +205,7 @@ class Experiment:
     def __init__(
             self,
             experiment_name="Experiment",
-            result_metric=RESULT_METRICS[0],
+            result_metric=None,
             optimization_method=OPTIMIZATION_METHOD[0],
             instance_generator=None,
             tuner_timeout=180,
@@ -229,11 +222,6 @@ class Experiment:
         a classifier with a set of hyperparameters on a given partition of
         the training set. (timeout per parameter setting)
         """
-        if result_metric not in Experiment.RESULT_METRICS:
-            raise ValueError("%s is not a valid result metric,"
-                             " choose one from: %s" % (
-                                 result_metric,
-                                 ", ".join(Experiment.RESULT_METRICS)))
 
         if optimization_method not in Experiment.OPTIMIZATION_METHOD:
             raise ValueError("%s is not a valid optimization method,"
@@ -359,6 +347,7 @@ class Experiment:
         self.file_name = file_name
         tree.write(file_name)
 
+    @abstractmethod
     def set_data_set(self,
                      train_data,
                      train_labels,
@@ -366,48 +355,11 @@ class Experiment:
                      test_labels=None,
                      feature_names=None,
                      name="dataset1"):
-        """
-        Add a dataset that the experiment will be run on.
-        (For now only one dataset per experiment is supported)
+        pass
 
-        :param train_data: training data as a 2 dimensional list, n_samples x n_features + 1 (label)
-        :param test_data: test data as a 2 dimensional list, n_samples x n_features
-        :param feature_names: the name of each feature
-        :param name: the name of the dataset
-        """
-        fname_train = name + "_train.arff"
-        if test_data is not None and test_labels is not None:
-            fname_test = name + "_test.arff"
-            #add the labels as the last column to the test data:
-            test_data = np.asarray(test_data)
-            test_labels = np.asarray(test_labels)
-
-            assert len(test_data.shape) == 2, "test_data needs to be 2d: n_samples x n_features"
-            assert len(test_labels.shape) == 1, "test_labels needs to be 1d"
-            #assert test_labels.dtype == np.int, "the labels need to be integer values"
-
-            #test_combined = np.append(test_data,test_labels[:,None],1)
-        else:
-            fname_test = None
-
-        #add the labels as the last column to the train data:
-        train_data = np.asarray(train_data)
-        train_labels = np.asarray(train_labels)
-        #train_combined = np.append(train_data,train_labels[:,None],1)
-        train_unique_labels = np.unique(train_labels)
-
-        assert len(train_data.shape) == 2, "train_data needs to be 2d: n_samples x n_features + 1 (label)"
-        assert len(train_labels.shape) == 1, "train_labels needs to be 1d"
-        #assert train_labels.dtype == np.int, "the labels need to be integer values"
- 
-        with open(fname_train, 'w') as fout:
-            arff_write(fout, name, train_data, train_labels, feature_names)
-
-        if fname_test:
-            with open(fname_test, 'w') as fout:
-                arff_write(fout, name, test_data, test_labels, feature_names)
-
-        self.datasets = [DataSet(fname_train, fname_test, name, train_unique_labels)]
+    @abstractmethod
+    def _write_prediction_file(self, prediction_file, X):
+        pass
 
     def set_data_set_files(self, train_file, test_file=None, name=None):
         """
@@ -533,7 +485,6 @@ class Experiment:
         Make predictions on unseen data, using the best parameters.
 
         The predictions will be written in CSV format into predictions_file.
-        TODO: predict from ndarray
         """
         #TODO: check the experiment has been run already
         if len(self.datasets) == 0:
@@ -579,37 +530,20 @@ class Experiment:
 
     def predict(self, X):
         """
+            Make predictions.
         """
-
         temp_dir = tempfile.mkdtemp()
         prediction_data_path = os.path.join(temp_dir, "X.arff")
         prediction_output_path = os.path.join(temp_dir, "out.csv")
 
-
         try:
-            #write to temporary file:
-            #predict_fd, predict_file_path = tempfile.mkstemp(suffix=".arff")
-            #print "writing to temporary file: %s" % predict_file_path
-
-
             with open(prediction_data_path, 'w') as prediction_file:
-            #prediction_file = os.fdopen(predict_fd, 'w')
-
                 X = np.asarray(X)
-
                 assert len(X.shape) == 2, "X needs to be 2d: n_samples x n_features"
 
-                #TODO: check if train and test data have the same dimensionality
-
-                pseudo_label = [self.datasets[0].unique_labels[0]] * X.shape[0]
-
-                arff_write(prediction_file,
-                    "prediction_data",
-                    X,
-                    pseudo_label,
-                    unique_labels=self.datasets[0].unique_labels)
+                self._write_prediction_file(prediction_file, X)
                 prediction_file.flush()
-
+                
                 self.predict_from_file(prediction_data_path,
                     predictions_file=prediction_output_path,
                     hide_output=True)
@@ -632,5 +566,153 @@ class Experiment:
     def score(self, X, y):
         pass
 
+class ClassificationExperiment(Experiment):
+
+    RESULT_METRICS = ["errorRate"]
+
+    def __init__(self,
+                 result_metric=RESULT_METRICS[0],
+                 *args,
+                 **kwargs):
+        if result_metric not in ClassificationExperiment.RESULT_METRICS:
+            raise ValueError("%s is not a valid classification result metric,"
+                             " choose one from: %s" % (
+                                 result_metric,
+                                 ", ".join(ClassificationExperiment.RESULT_METRICS)))
+        super(ClassificationExperiment, self).__init__(result_metric=result_metric, *args, **kwargs)
+
+    def set_data_set(self,
+                     train_data,
+                     train_labels,
+                     test_data=None,
+                     test_labels=None,
+                     feature_names=None,
+                     name="dataset1"):
+        """
+        Add a dataset that the experiment will be run on.
+        (For now only one dataset per experiment is supported)
+
+        :param train_data: training data as a 2 dimensional list, n_samples x n_features + 1 (label)
+        :param test_data: test data as a 2 dimensional list, n_samples x n_features
+        :param feature_names: the name of each feature
+        :param name: the name of the dataset
+        """
+        fname_train = name + "_train.arff"
+        if test_data is not None and test_labels is not None:
+            fname_test = name + "_test.arff"
+            #add the labels as the last column to the test data:
+            test_data = np.asarray(test_data)
+            test_labels = np.asarray(test_labels)
+
+            assert len(test_data.shape) == 2, "test_data needs to be 2d: n_samples x n_features"
+            assert len(test_labels.shape) == 1, "test_labels needs to be 1d"
+            #assert test_labels.dtype == np.int, "the labels need to be integer values"
+
+            #test_combined = np.append(test_data,test_labels[:,None],1)
+        else:
+            fname_test = None
+
+        #add the labels as the last column to the train data:
+        train_data = np.asarray(train_data)
+        train_labels = np.asarray(train_labels)
+        #train_combined = np.append(train_data,train_labels[:,None],1)
+        train_unique_labels = np.unique(train_labels)
+
+        assert len(train_data.shape) == 2, "train_data needs to be 2d: n_samples x n_features + 1 (label)"
+        assert len(train_labels.shape) == 1, "train_labels needs to be 1d"
+        #assert train_labels.dtype == np.int, "the labels need to be integer values"
+ 
+        with open(fname_train, 'w') as fout:
+            arff_write(fout, name, train_data, train_labels, feature_names, train_unique_labels)
+
+        if fname_test:
+            with open(fname_test, 'w') as fout:
+                arff_write(fout, name, test_data, test_labels, feature_names, train_unique_labels)
+
+        self.datasets = [DataSet(fname_train, fname_test, name, train_unique_labels)]
 
 
+    def _write_prediction_file(self, prediction_file, X):
+        pseudo_label = [self.datasets[0].unique_labels[0]] * X.shape[0]
+        arff_write(prediction_file,
+            "prediction_data",
+            X,
+            pseudo_label,
+            unique_labels=self.datasets[0].unique_labels)
+
+
+class RegressionExperiment(Experiment):
+
+    RESULT_METRICS = ["rmse",
+                      "rrse",#root relative square error
+                      "meanAbsoluteErrorMetric",
+                      "relativeAbsoluteErrorMetric"]
+
+    def __init__(self,
+                 result_metric=RESULT_METRICS[0],
+                 *args,
+                 **kwargs):
+        if result_metric not in RegressionExperiment.RESULT_METRICS:
+            raise ValueError("%s is not a valid regression result metric,"
+                             " choose one from: %s" % (
+                                 result_metric,
+                                 ", ".join(RegressionExperiment.RESULT_METRICS)))
+        super(RegressionExperiment, self).__init__(result_metric=result_metric, *args, **kwargs)
+
+    def set_data_set(self,
+                     train_data,
+                     train_labels,
+                     test_data=None,
+                     test_labels=None,
+                     feature_names=None,
+                     name="dataset1"):
+        """
+        Add a dataset that the experiment will be run on.
+        (For now only one dataset per experiment is supported)
+
+        :param train_data: training data as a 2 dimensional list, n_samples x n_features + 1 (label)
+        :param test_data: test data as a 2 dimensional list, n_samples x n_features
+        :param feature_names: the name of each feature
+        :param name: the name of the dataset
+        """
+        fname_train = name + "_train.arff"
+        if test_data is not None and test_labels is not None:
+            fname_test = name + "_test.arff"
+            #add the labels as the last column to the test data:
+            test_data = np.asarray(test_data)
+            test_labels = np.asarray(test_labels)
+
+            assert len(test_data.shape) == 2, "test_data needs to be 2d: n_samples x n_features"
+            assert len(test_labels.shape) == 1, "test_labels needs to be 1d"
+            #assert test_labels.dtype == np.int, "the labels need to be integer values"
+
+            #test_combined = np.append(test_data,test_labels[:,None],1)
+        else:
+            fname_test = None
+
+        #add the labels as the last column to the train data:
+        train_data = np.asarray(train_data)
+        train_labels = np.asarray(train_labels)
+
+        assert len(train_data.shape) == 2, "train_data needs to be 2d: n_samples x n_features + 1 (label)"
+        assert len(train_labels.shape) == 1, "train_labels needs to be 1d"
+ 
+        with open(fname_train, 'w') as fout:
+            arff_write(fout, name, train_data, train_labels, feature_names, unique_labels=None)
+
+        if fname_test:
+            with open(fname_test, 'w') as fout:
+                arff_write(fout, name, test_data, test_labels, feature_names, unique_labels=None)
+
+        self.datasets = [DataSet(fname_train, fname_test, name)]
+
+
+    def _write_prediction_file(self, prediction_file, X):
+        pseudo_targets = [1.] * X.shape[0]
+        arff_write(prediction_file,
+            "prediction_data",
+            X,
+            pseudo_targets,
+            unique_labels=None)
+
+ 
